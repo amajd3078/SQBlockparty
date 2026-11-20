@@ -1,0 +1,597 @@
+# ========================================================
+#                   SQBp - Block Party
+#            Vanilla Skript (No Addons Needed)
+# ========================================================
+
+options:
+    prefix: &8[&d&lSQBp&8] &r
+    
+    # --- Double Jump Settings ---
+    # Set to 0 to disable Double Jump, or set cooldown in seconds
+    double-jump-cooldown: 5
+    
+    # --- Floor Speed Settings (in seconds) ---
+    initial-round-time: 5.0
+    speed-decrease-per-minute: 0.5
+    min-round-time: 1.5
+    floor-gone-time: 3 seconds
+    
+    # --- Fall Settings ---
+    fall-depth: 3
+    
+    # --- Sound Effects Settings ---
+    sound-volume: 1.0
+    sound-join: "entity.experience_orb.pickup"
+    sound-countdown: "block.note_block.pling"
+    sound-game-start: "entity.player.levelup"
+    sound-color-pick: "block.note_block.bit"
+    sound-floor-drop: "entity.item.break"
+    sound-double-jump: "entity.bat.takeoff"
+    sound-dj-ready: "block.note_block.chime"
+    sound-win: "ui.toast.challenge_complete"
+    sound-lose: "entity.villager.no"
+
+# ========================================================
+#                   Admin & Player Commands
+# ========================================================
+
+command /sqbp [<text>] [<text>] [<text>]:
+    trigger:
+        if player does not have permission "sqbp.admin":
+            send "{@prefix}&cYou do not have permission to use this command."
+            stop
+
+        if arg-1 is not set:
+            send "&8&m----------------------------------------"
+            send "{@prefix}&dBlock Party Admin Commands:"
+            send "&e/sqbp addarena <name> <max_players> &7- Create a new arena"
+            send "&e/sqbp delarena <name> &7- Delete an arena"
+            send "&e/sqbp pos1 &7- Set first floor corner (block below you)"
+            send "&e/sqbp pos2 &7- Set second floor corner (block below you)"
+            send "&e/sqbp setfloor <name> &7- Save floor from pos1 & pos2"
+            send "&e/sqbp setspawn <name> &7- Set game start spawn point"
+            send "&e/sqbp setlobby <name> &7- Set waiting lobby for arena"
+            send "&e/sqbp sethub &7- Set main server hub"
+            send "&e/sqbp arenalist &7- List all arenas"
+            send "&8&m----------------------------------------"
+            stop
+
+        # 1. Add Arena
+        if arg-1 is "addarena":
+            if arg-2 is not set:
+                send "{@prefix}&cUsage: /sqbp addarena <name> <max_players>"
+                stop
+            set {_max} to arg-3 parsed as integer
+            if {_max} is not set:
+                send "{@prefix}&cPlease enter a valid number for max players."
+                stop
+            if {_max} < 2:
+                send "{@prefix}&cMax players must be at least 2."
+                stop
+            if {sqbp::arenas::*} contains arg-2:
+                send "{@prefix}&cAn arena with this name already exists!"
+                stop
+            
+            add arg-2 to {sqbp::arenas::*}
+            set {sqbp::arena::%arg-2%::max} to {_max}
+            set {sqbp::arena::%arg-2%::state} to "waiting"
+            
+            play sound {@sound-game-start} with volume {@sound-volume} and pitch 1.2 to player
+            send "{@prefix}&aCreated arena &e%arg-2% &awith max &e%{_max}% &aplayers!"
+            send "{@prefix}&7Next steps: &fpos1&7, &fpos2&7, &fsetfloor&7, &fsetspawn&7, and &fsetlobby&7."
+
+        # 2. Delete Arena
+        else if arg-1 is "delarena":
+            if arg-2 is not set:
+                send "{@prefix}&cUsage: /sqbp delarena <name>"
+                stop
+            if {sqbp::arenas::*} does not contain arg-2:
+                send "{@prefix}&cArena not found."
+                stop
+            remove arg-2 from {sqbp::arenas::*}
+            delete {sqbp::arena::%arg-2%::*}
+            play sound {@sound-floor-drop} with volume {@sound-volume} and pitch 0.9 to player
+            send "{@prefix}&aDeleted arena &e%arg-2%&a."
+
+        # 3. Position 1 (Block below player)
+        else if arg-1 is "pos1":
+            set {_loc} to location of block below player
+            set {sqbp::select::%uuid of player%::pos1} to {_loc}
+            play sound {@sound-dj-ready} with volume {@sound-volume} and pitch 1.1 to player
+            send "{@prefix}&aPosition 1 set to &e%x-coord of {_loc}%, %y-coord of {_loc}%, %z-coord of {_loc}%&a."
+
+        # 4. Position 2 (Block below player)
+        else if arg-1 is "pos2":
+            set {_loc} to location of block below player
+            set {sqbp::select::%uuid of player%::pos2} to {_loc}
+            play sound {@sound-dj-ready} with volume {@sound-volume} and pitch 1.3 to player
+            send "{@prefix}&aPosition 2 set to &e%x-coord of {_loc}%, %y-coord of {_loc}%, %z-coord of {_loc}%&a."
+
+        # 5. Set Floor from pos1 and pos2
+        else if arg-1 is "setfloor":
+            if arg-2 is not set:
+                send "{@prefix}&cUsage: /sqbp setfloor <arena_name>"
+                stop
+            if {sqbp::arenas::*} does not contain arg-2:
+                send "{@prefix}&cArena not found."
+                stop
+            if {sqbp::select::%uuid of player%::pos1} is not set:
+                send "{@prefix}&cYou must set &epos1 &cfirst using &f/sqbp pos1&c."
+                stop
+            if {sqbp::select::%uuid of player%::pos2} is not set:
+                send "{@prefix}&cYou must set &epos2 &cfirst using &f/sqbp pos2&c."
+                stop
+                
+            set {_p1} to {sqbp::select::%uuid of player%::pos1}
+            set {_p2} to {sqbp::select::%uuid of player%::pos2}
+            set {sqbp::arena::%arg-2%::pos1} to {_p1}
+            set {sqbp::arena::%arg-2%::pos2} to {_p2}
+            
+            if y-coord of {_p1} <= y-coord of {_p2}:
+                set {sqbp::arena::%arg-2%::floorY} to y-coord of {_p1}
+            else:
+                set {sqbp::arena::%arg-2%::floorY} to y-coord of {_p2}
+                
+            sqbp_generateFloor(arg-2)
+            play sound {@sound-game-start} with volume {@sound-volume} and pitch 1.3 to player
+            send "{@prefix}&aFloor successfully saved and generated for arena &e%arg-2%&a!"
+
+        # 6. Set Game Spawn Point
+        else if arg-1 is "setspawn":
+            if arg-2 is not set:
+                send "{@prefix}&cUsage: /sqbp setspawn <arena_name>"
+                stop
+            if {sqbp::arenas::*} does not contain arg-2:
+                send "{@prefix}&cArena not found."
+                stop
+            set {sqbp::arena::%arg-2%::spawn} to player's location
+            play sound {@sound-dj-ready} with volume {@sound-volume} and pitch 1.2 to player
+            send "{@prefix}&aGame start spawn point set for arena &e%arg-2%&a."
+
+        # 7. Set Arena Waiting Lobby
+        else if arg-1 is "setlobby":
+            if arg-2 is not set:
+                send "{@prefix}&cUsage: /sqbp setlobby <arena_name>"
+                stop
+            if {sqbp::arenas::*} does not contain arg-2:
+                send "{@prefix}&cArena not found."
+                stop
+            set {sqbp::arena::%arg-2%::lobby} to player's location
+            play sound {@sound-dj-ready} with volume {@sound-volume} and pitch 1.2 to player
+            send "{@prefix}&aWaiting lobby set for arena &e%arg-2%&a."
+
+        # 8. Set Main Hub
+        else if arg-1 is "sethub":
+            set {sqbp::hub} to player's location
+            play sound {@sound-dj-ready} with volume {@sound-volume} and pitch 1.2 to player
+            send "{@prefix}&aSet main server hub location."
+
+        # 9. Arena List
+        else if arg-1 is "arenalist":
+            if size of {sqbp::arenas::*} is 0:
+                send "{@prefix}&cNo arenas configured yet."
+                stop
+            send "{@prefix}&dAvailable Arenas:"
+            loop {sqbp::arenas::*}:
+                set {_a} to loop-value
+                set {_count} to size of {sqbp::arena::%{_a}%::players::*}
+                set {_max} to {sqbp::arena::%{_a}%::max}
+                set {_st} to {sqbp::arena::%{_a}%::state}
+                send "&8- &e%{_a}% &7(&f%{_count}%/%{_max}%&7) - State: &b%{_st}%"
+
+command /join [<text>]:
+    trigger:
+        if {sqbp::player::%uuid of player%::arena} is set:
+            send "{@prefix}&cYou are already in an arena! Type &e/hub &cto leave."
+            stop
+        if arg-1 is not set:
+            send "{@prefix}&cUsage: /join <arena_name>"
+            stop
+        if {sqbp::arenas::*} does not contain arg-1:
+            send "{@prefix}&cThis arena does not exist."
+            stop
+        if {sqbp::arena::%arg-1%::lobby} is not set:
+            send "{@prefix}&cWaiting lobby is not set for this arena."
+            stop
+        if {sqbp::arena::%arg-1%::spawn} is not set:
+            send "{@prefix}&cGame spawn point is not set for this arena."
+            stop
+        if {sqbp::arena::%arg-1%::pos1} is not set:
+            send "{@prefix}&cFloor is not set for this arena."
+            stop
+        if {sqbp::arena::%arg-1%::state} is "playing":
+            send "{@prefix}&cA match is already in progress in this arena."
+            stop
+        set {_count} to size of {sqbp::arena::%arg-1%::players::*}
+        set {_max} to {sqbp::arena::%arg-1%::max}
+        if {_count} >= {_max}:
+            send "{@prefix}&cThis arena is full!"
+            stop
+
+        add player to {sqbp::arena::%arg-1%::players::*}
+        set {sqbp::player::%uuid of player%::arena} to arg-1
+        clear player's inventory
+        set player's gamemode to adventure
+        set player's health to 20
+        set player's food level to 20
+        teleport player to {sqbp::arena::%arg-1%::lobby}
+        
+        set {_newCount} to size of {sqbp::arena::%arg-1%::players::*}
+        loop {sqbp::arena::%arg-1%::players::*}:
+            send "{@prefix}&e%player% &ajoined the game! &7(&f%{_newCount}%/%{_max}%&7)" to loop-value
+            play sound {@sound-join} with volume {@sound-volume} and pitch 1.1 to loop-value
+        
+        sqbp_checkCountdown(arg-1)
+
+command /hub:
+    trigger:
+        if {sqbp::player::%uuid of player%::arena} is set:
+            set {_a} to {sqbp::player::%uuid of player%::arena}
+            sqbp_leaveArena(player, {_a}, false)
+        else:
+            if {sqbp::hub} is set:
+                teleport player to {sqbp::hub}
+                play sound {@sound-join} with volume {@sound-volume} and pitch 1.0 to player
+                send "{@prefix}&aTeleported to the main hub."
+            else:
+                send "{@prefix}&cHub location has not been set yet."
+
+# ========================================================
+#                   Countdown & Percentage System
+# ========================================================
+
+function sqbp_checkCountdown(a: text):
+    set {_count} to size of {sqbp::arena::%{_a}%::players::*}
+    set {_max} to {sqbp::arena::%{_a}%::max}
+    
+    if {_count} <= 1:
+        delete {sqbp::arena::%{_a}%::starting}
+        delete {sqbp::arena::%{_a}%::timer}
+        loop {sqbp::arena::%{_a}%::players::*}:
+            send "{@prefix}&cCountdown stopped due to insufficient players." to loop-value
+            play sound {@sound-lose} with volume {@sound-volume} and pitch 0.9 to loop-value
+        stop
+
+    set {_percent} to ({_count} / {_max}) * 100
+    
+    if {_percent} >= 100:
+        set {_targetTime} to 10
+    else if {_percent} >= 50:
+        set {_targetTime} to 30
+    else if {_percent} >= 25:
+        set {_targetTime} to 60
+    else:
+        stop
+
+    if {sqbp::arena::%{_a}%::starting} is not set:
+        set {sqbp::arena::%{_a}%::starting} to true
+        set {sqbp::arena::%{_a}%::timer} to {_targetTime}
+        sqbp_runCountdown({_a})
+    else:
+        if {sqbp::arena::%{_a}%::timer} > {_targetTime}:
+            set {sqbp::arena::%{_a}%::timer} to {_targetTime}
+            loop {sqbp::arena::%{_a}%::players::*}:
+                send "{@prefix}&eCountdown reduced to &c%{_targetTime}%s &edue to player threshold!" to loop-value
+                play sound {@sound-countdown} with volume {@sound-volume} and pitch 1.4 to loop-value
+
+function sqbp_runCountdown(a: text):
+    while {sqbp::arena::%{_a}%::starting} is true:
+        if {sqbp::arena::%{_a}%::state} is not "waiting":
+            stop
+        set {_count} to size of {sqbp::arena::%{_a}%::players::*}
+        if {_count} <= 1:
+            delete {sqbp::arena::%{_a}%::starting}
+            stop
+            
+        set {_t} to {sqbp::arena::%{_a}%::timer}
+        if {_t} <= 0:
+            delete {sqbp::arena::%{_a}%::starting}
+            sqbp_startGame({_a})
+            stop
+            
+        if {_t} is 60 or 30 or 15 or 10 or 5 or 4 or 3 or 2 or 1:
+            loop {sqbp::arena::%{_a}%::players::*}:
+                send "{@prefix}&eGame starting in &c%{_t}% &eseconds!" to loop-value
+                if {_t} <= 5:
+                    play sound {@sound-countdown} with volume {@sound-volume} and pitch 1.5 to loop-value
+                else:
+                    play sound {@sound-countdown} with volume {@sound-volume} and pitch 1.0 to loop-value
+                
+        remove 1 from {sqbp::arena::%{_a}%::timer}
+        wait 1 second
+
+# ========================================================
+#                   Live In-Game Action Bar
+# ========================================================
+
+function sqbp_formatTime(totalSeconds: number) :: text:
+    set {_mins} to floor({_totalSeconds} / 60)
+    set {_secs} to floor(mod({_totalSeconds}, 60))
+    if {_mins} < 10:
+        set {_mStr} to "0%{_mins}%"
+    else:
+        set {_mStr} to "%{_mins}%"
+    if {_secs} < 10:
+        set {_sStr} to "0%{_secs}%"
+    else:
+        set {_sStr} to "%{_secs}%"
+    return "%{_mStr}%:%{_sStr}%"
+
+function sqbp_getDJCooldown() :: number:
+    set {_cd} to {@double-jump-cooldown}
+    return {_cd}
+
+function sqbp_colorName(b: item) :: text:
+    if {_b} is red wool:
+        return "&cRED"
+    else if {_b} is blue wool:
+        return "&9BLUE"
+    else if {_b} is green wool:
+        return "&2GREEN"
+    else if {_b} is yellow wool:
+        return "&eYELLOW"
+    else if {_b} is purple wool:
+        return "&5PURPLE"
+    else if {_b} is orange wool:
+        return "&6ORANGE"
+    else if {_b} is cyan wool:
+        return "&3CYAN"
+    else if {_b} is pink wool:
+        return "&dPINK"
+    else if {_b} is lime wool:
+        return "&aLIME"
+    return "COLOR"
+
+function sqbp_actionBarLoop(p: player, a: text):
+    set {_djMax} to sqbp_getDJCooldown()
+    while {_p} is online:
+        if {sqbp::player::%uuid of {_p}%::arena} is not {_a}:
+            stop
+        if {sqbp::arena::%{_a}%::state} is not "playing":
+            stop
+            
+        set {_elapsed} to difference between {sqbp::arena::%{_a}%::startTime} and now
+        set {_timeText} to sqbp_formatTime(seconds of {_elapsed})
+        set {_ping} to {_p}'s ping
+        set {_alive} to size of {sqbp::arena::%{_a}%::players::*}
+        
+        if {_djMax} <= 0:
+            set {_djStatus} to "&cLocked"
+        else:
+            if {sqbp::player::%uuid of {_p}%::djCooldown} is set:
+                set {_djDiff} to difference between {sqbp::player::%uuid of {_p}%::djCooldown} and now
+                set {_cdSec} to {_djMax} - (seconds of {_djDiff})
+                if {_cdSec} > 0:
+                    set {_rem} to round({_cdSec} * 10) / 10
+                    set {_djStatus} to "&eCooldown (%{_rem}%s)"
+                else:
+                    set {_djStatus} to "&aReady"
+            else:
+                set {_djStatus} to "&aReady"
+                
+        send action bar "&fTime: &e%{_timeText}% &8| &fPing: &b%{_ping}%ms &8| &fPlayers: &d%{_alive}% &8| &fDouble Jump: %{_djStatus}%" to {_p}
+        wait 5 ticks
+
+# ========================================================
+#                   Gameplay & Floor Logic
+# ========================================================
+
+function sqbp_startGame(a: text):
+    set {sqbp::arena::%{_a}%::state} to "playing"
+    set {sqbp::arena::%{_a}%::startTime} to now
+    set {sqbp::arena::%{_a}%::currentTime} to {@initial-round-time}
+    set {_djMax} to sqbp_getDJCooldown()
+    
+    loop {sqbp::arena::%{_a}%::players::*}:
+        set {_p} to loop-value
+        delete {sqbp::player::%uuid of {_p}%::djCooldown}
+        teleport {_p} to {sqbp::arena::%{_a}%::spawn}
+        clear {_p}'s inventory
+        if {_djMax} > 0:
+            set {_p}'s flight mode to true
+        sqbp_actionBarLoop({_p}, {_a})
+        play sound {@sound-game-start} with volume {@sound-volume} and pitch 1.0 to {_p}
+        send "{@prefix}&a&lGame Started! Stand on the matching color!" to {_p}
+        
+    sqbp_gameLoop({_a})
+
+function sqbp_gameLoop(a: text):
+    set {_colors::*} to red wool, blue wool, green wool, yellow wool, purple wool, orange wool, cyan wool, pink wool and lime wool
+    
+    while {sqbp::arena::%{_a}%::state} is "playing":
+        if size of {sqbp::arena::%{_a}%::players::*} <= 1:
+            sqbp_endGame({_a})
+            stop
+            
+        # 1. Generate floor & play unified random disc for everyone in the arena
+        sqbp_generateFloor({_a})
+        sqbp_playArenaMusic({_a})
+        
+        # 2. Calculate progressive speed per minute elapsed
+        set {_elapsed} to difference between {sqbp::arena::%{_a}%::startTime} and now
+        set {_minutes} to floor((seconds of {_elapsed}) / 60)
+        set {_calcTime} to {@initial-round-time} - ({_minutes} * {@speed-decrease-per-minute})
+        if {_calcTime} < {@min-round-time}:
+            set {_calcTime} to {@min-round-time}
+        set {sqbp::arena::%{_a}%::currentTime} to {_calcTime}
+        
+        set {_chosen} to random element out of {_colors::*}
+        set {_colorLabel} to sqbp_colorName({_chosen})
+        
+        loop {sqbp::arena::%{_a}%::players::*}:
+            set slot 4 of loop-value's inventory to {_chosen}
+            send "{@prefix}&eTarget Color: &l%{_colorLabel}% &8| &7Round Speed: &b%{_calcTime}%s" to loop-value
+            play sound {@sound-color-pick} with volume {@sound-volume} and pitch 1.2 to loop-value
+            
+        # 3. Wait current round duration
+        wait "%{_calcTime}% seconds" parsed as timespan
+        
+        if {sqbp::arena::%{_a}%::state} is not "playing":
+            stop
+            
+        # 4. Remove non-matching blocks & stop music immediately
+        loop blocks within {sqbp::arena::%{_a}%::pos1} and {sqbp::arena::%{_a}%::pos2}:
+            if type of loop-block is not {_chosen}:
+                set loop-block to air
+                
+        sqbp_stopArenaMusic({_a})
+        loop {sqbp::arena::%{_a}%::players::*}:
+            play sound {@sound-floor-drop} with volume {@sound-volume} and pitch 0.85 to loop-value
+            
+        # 5. Wait while floor is gone before regenerating next round
+        wait {@floor-gone-time}
+        
+        if {sqbp::arena::%{_a}%::state} is not "playing":
+            stop
+
+function sqbp_generateFloor(a: text):
+    set {_colors::*} to red wool, blue wool, green wool, yellow wool, purple wool, orange wool, cyan wool, pink wool and lime wool
+    loop blocks within {sqbp::arena::%{_a}%::pos1} and {sqbp::arena::%{_a}%::pos2}:
+        set loop-block to random element out of {_colors::*}
+
+function sqbp_winEffects(p: player):
+    send title "&6&lVICTORY!" with subtitle "&eYou are the last player standing in Block Party!" to {_p} for 4 seconds
+    play sound {@sound-win} with volume {@sound-volume} and pitch 1.0 to {_p}
+    play sound "entity.firework_rocket.launch" with volume {@sound-volume} and pitch 1.1 to {_p}
+    play sound "entity.firework_rocket.blast" with volume {@sound-volume} and pitch 1.0 to {_p}
+    play sound "entity.firework_rocket.twinkle" with volume {@sound-volume} and pitch 1.2 to {_p}
+
+function sqbp_loseEffects(p: player):
+    send title "&c&lDEFEAT!" with subtitle "&7You fell off the Block Party floor!" to {_p} for 3 seconds
+    play sound {@sound-lose} with volume {@sound-volume} and pitch 0.8 to {_p}
+    play sound "entity.player.hurt" with volume {@sound-volume} and pitch 0.8 to {_p}
+
+function sqbp_endGame(a: text):
+    set {sqbp::arena::%{_a}%::state} to "waiting"
+    sqbp_stopArenaMusic({_a})
+    
+    if size of {sqbp::arena::%{_a}%::players::*} is 1:
+        set {_winner} to first element out of {sqbp::arena::%{_a}%::players::*}
+        broadcast "{@prefix}&6&lCongratulations! &e%{_winner}% &awon Block Party in arena &e%{_a}%&a!"
+        sqbp_winEffects({_winner})
+        wait 2 seconds
+    
+    loop {sqbp::arena::%{_a}%::players::*}:
+        set {_p} to loop-value
+        set {_p}'s flight mode to false
+        clear {_p}'s inventory
+        delete {sqbp::player::%uuid of {_p}%::arena}
+        delete {sqbp::player::%uuid of {_p}%::djCooldown}
+        if {sqbp::hub} is set:
+            teleport {_p} to {sqbp::hub}
+            
+    delete {sqbp::arena::%{_a}%::players::*}
+    sqbp_generateFloor({_a})
+
+function sqbp_leaveArena(p: player, a: text, lost: boolean):
+    sqbp_stopPlayerMusic({_p}, {_a})
+    remove {_p} from {sqbp::arena::%{_a}%::players::*}
+    delete {sqbp::player::%uuid of {_p}%::arena}
+    delete {sqbp::player::%uuid of {_p}%::djCooldown}
+    set {_p}'s flight mode to false
+    clear {_p}'s inventory
+    
+    if {_lost} is true:
+        sqbp_loseEffects({_p})
+        
+    if {sqbp::hub} is set:
+        teleport {_p} to {sqbp::hub}
+    send "{@prefix}&eYou left the arena." to {_p}
+    
+    if {sqbp::arena::%{_a}%::state} is "waiting":
+        sqbp_checkCountdown({_a})
+    else if {sqbp::arena::%{_a}%::state} is "playing":
+        if size of {sqbp::arena::%{_a}%::players::*} <= 1:
+            sqbp_endGame({_a})
+
+# ========================================================
+#                   Jukebox Music
+# ========================================================
+
+function sqbp_playArenaMusic(a: text):
+    set {_discs::*} to "minecraft:music_disc.bounce", "minecraft:music_disc.lava_chicken", "minecraft:music_disc.tears", "minecraft:music_disc.otherside", "minecraft:music_disc.precipice", "minecraft:music_disc.cat", "minecraft:music_disc.blocks", "minecraft:music_disc.chirp", "minecraft:music_disc.far", "minecraft:music_disc.mall", "minecraft:music_disc.mellohi", "minecraft:music_disc.stal", "minecraft:music_disc.strad", "minecraft:music_disc.ward", "minecraft:music_disc.wait", "minecraft:music_disc.pigstep", "minecraft:music_disc.5", "minecraft:music_disc.relic" and "minecraft:music_disc.creator"
+    
+    sqbp_stopArenaMusic({_a})
+    set {_song} to random element out of {_discs::*}
+    set {sqbp::arena::%{_a}%::currentSong} to {_song}
+    
+    loop {sqbp::arena::%{_a}%::players::*}:
+        play sound {_song} with volume 1.0 and pitch 1.0 to loop-value
+
+function sqbp_stopArenaMusic(a: text):
+    if {sqbp::arena::%{_a}%::currentSong} is set:
+        set {_song} to {sqbp::arena::%{_a}%::currentSong}
+        loop {sqbp::arena::%{_a}%::players::*}:
+            make console execute command "stopsound %loop-value% * %{_song}%"
+        delete {sqbp::arena::%{_a}%::currentSong}
+
+function sqbp_stopPlayerMusic(p: player, a: text):
+    if {sqbp::arena::%{_a}%::currentSong} is set:
+        make console execute command "stopsound %{_p}% * %{sqbp::arena::%{_a}%::currentSong}%"
+
+# ========================================================
+#             Events (Double Jump + Fall + Protection)
+# ========================================================
+
+on flight toggle:
+    if {sqbp::player::%uuid of player%::arena} is set:
+        set {_a} to {sqbp::player::%uuid of player%::arena}
+        if {sqbp::arena::%{_a}%::state} is "playing":
+            if player's gamemode is not creative:
+                cancel event
+                set player's flight mode to false
+                set {_djMax} to sqbp_getDJCooldown()
+                if {_djMax} <= 0:
+                    stop
+                
+                if {sqbp::player::%uuid of player%::djCooldown} is set:
+                    set {_diff} to difference between {sqbp::player::%uuid of player%::djCooldown} and now
+                    if {_diff} < "%{_djMax}% seconds" parsed as timespan:
+                        play sound {@sound-lose} with volume {@sound-volume} and pitch 1.3 to player
+                        stop
+                
+                set {sqbp::player::%uuid of player%::djCooldown} to now
+                push player upwards at speed 0.85
+                push player in direction of player at speed 0.55
+                play sound {@sound-double-jump} with volume {@sound-volume} and pitch 1.2 to player
+                
+                wait "%{_djMax}% seconds" parsed as timespan
+                if {sqbp::player::%uuid of player%::arena} is set:
+                    if {sqbp::arena::%{sqbp::player::%uuid of player%::arena}%::state} is "playing":
+                        set player's flight mode to true
+                        play sound {@sound-dj-ready} with volume {@sound-volume} and pitch 1.3 to player
+
+on player move:
+    if {sqbp::player::%uuid of player%::arena} is set:
+        set {_a} to {sqbp::player::%uuid of player%::arena}
+        if {sqbp::arena::%{_a}%::state} is "playing":
+            set {_limitY} to {sqbp::arena::%{_a}%::floorY} - {@fall-depth}
+            if y-coord of player <= {_limitY}:
+                loop {sqbp::arena::%{_a}%::players::*}:
+                    send "{@prefix}&c%player% &efell out of the arena!" to loop-value
+                sqbp_leaveArena(player, {_a}, true)
+
+on quit:
+    if {sqbp::player::%uuid of player%::arena} is set:
+        set {_a} to {sqbp::player::%uuid of player%::arena}
+        sqbp_leaveArena(player, {_a}, false)
+
+on damage:
+    if {sqbp::player::%uuid of victim%::arena} is set:
+        cancel event
+
+on break:
+    if {sqbp::player::%uuid of player%::arena} is set:
+        cancel event
+
+on place:
+    if {sqbp::player::%uuid of player%::arena} is set:
+        cancel event
+
+on drop:
+    if {sqbp::player::%uuid of player%::arena} is set:
+        cancel event
+
+on inventory click:
+    if {sqbp::player::%uuid of player%::arena} is set:
+        cancel event
